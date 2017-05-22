@@ -1,0 +1,261 @@
+package com.sf.module.edms.util;
+
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+
+import android.annotation.SuppressLint;
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.ImageFormat;
+import android.graphics.Matrix;
+import android.hardware.Camera;
+import android.hardware.Camera.CameraInfo;
+import android.hardware.Camera.ErrorCallback;
+import android.hardware.Camera.Parameters;
+import android.os.Message;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
+
+import com.sf.module.edms.camera.IPictureCallback;
+import com.sf.module.edms.constant.MsgCons;
+import com.sf.module.edms.constant.Settings;
+
+/***************************************
+ * 鎷嶇収娴佺▼<br>
+ * 1.鍒濆鍖杝urfaceview<br>
+ * 2.鍒濆鍖栨憚鍍忓ご<br>
+ * 3.鎵ц鎷嶇収<br>
+ * 4.淇濆瓨鍥剧墖<br>
+ *************************************** 
+ */
+
+public class CertifyCameraManager implements ErrorCallback {
+
+    private Camera camera = null;
+    private boolean mPreviewing = false;
+    private Parameters cameraParameters = null;
+    private SurfaceHolder holder;
+    private Context context;
+    private IPictureCallback iPictureCallback;
+
+    @SuppressLint({ "SimpleDateFormat" })
+    SimpleDateFormat format = new SimpleDateFormat("yyyyMMddHHmmss");
+
+    /**
+     * 鑾峰彇鎽勫儚澶�
+     * 
+     * @return 杩斿洖杩炴帴鐨勬憚鍍忓ご瀵硅薄
+     */
+    public Camera getCamera(Context context) {
+        this.context = context;
+        if (camera == null) {
+            LogUtil.wInfo("init Camera");
+            camera = openCamera();
+        }
+        return camera;
+    }
+
+    /**
+     * 鎵撳紑鎽勫儚澶�
+     * 
+     * @return 杩斿洖杩炴帴鐨勬憚鍍忓ご瀵硅薄鎴栬�卬ull
+     */
+    private Camera openCamera() {
+        LogUtil.wInfo("openCamera");
+        try {
+            camera = findCamera();
+            if (camera != null) {
+                initCamera(1280, 720);
+            }
+        } catch (Exception e) {
+            camera = null;
+            LogUtil.wError(e);
+            closeCamera();
+        }
+        return camera;
+    }
+
+    public Camera findCamera() {
+        int numberOfCameras = Camera.getNumberOfCameras();
+        if (numberOfCameras == 0) {
+            return null;
+        }
+        LogUtil.wInfo("find Camera number:" + numberOfCameras);
+        CameraInfo cameraInfo = new CameraInfo();
+        for (int i = 0; i < numberOfCameras; i++) {
+            Camera.getCameraInfo(i, cameraInfo);
+            if (cameraInfo.facing == CameraInfo.CAMERA_FACING_BACK) {
+                LogUtil.wInfo("FACING BACK CAMERA");
+                return Camera.open(i);
+            } else if (cameraInfo.facing == CameraInfo.CAMERA_FACING_FRONT) {
+                LogUtil.wInfo("FACING FRONT CAMERA");
+                return Camera.open(i);
+            }
+        }
+        return null;
+    }
+
+    public void initCamera(int width, int height) {
+        if (camera != null) {
+            camera.setErrorCallback(this);
+            setCameraParameters(width, height);
+        } else {
+
+        }
+    }
+
+    
+    public void initSurfaceView(SurfaceView surfaceView) {
+        holder = surfaceView.getHolder();
+    }
+    
+    
+    private void setCameraParameters(int width, int height) {
+        cameraParameters = camera.getParameters();
+        cameraParameters.setPreviewSize(width, height);
+        cameraParameters.setPictureSize(width, height);
+        cameraParameters.setPictureFormat(ImageFormat.JPEG);
+        cameraParameters.set("jpeg-quality", 100);
+        camera.setDisplayOrientation(90);
+        camera.setParameters(cameraParameters);
+    }
+
+    /**
+     * 鏃嬭浆鍥剧墖
+     * 
+     * @param angle
+     *            鏃嬭浆瑙掑害
+     * @param bitmap
+     * @return 杩斿洖鏃嬭浆鍚庣殑鍥剧墖鐨刡itmap
+     */
+    public static Bitmap rotaingImageView(int angle, int width, int height, Bitmap bitmap) {
+        Matrix matrix = new Matrix();
+        matrix.postRotate(angle);
+        Bitmap resizedBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height, matrix, true);
+        return resizedBitmap;
+    }
+
+    public void takePhoto() {
+        if (camera != null) {
+            LogUtil.info("鎷嶇収");
+            camera.takePicture(null, null, pictureCallback);
+        } else {
+
+        }
+    }
+
+    
+    private Camera.PictureCallback pictureCallback = new Camera.PictureCallback() {
+
+        @Override
+        public void onPictureTaken(byte[] data, Camera camera) {
+
+            stopPreview();
+            String photo_name = "";
+            String path = Settings.get().getCertifyPath();
+            File file = new File(path);
+            if (!file.exists()) {
+                file.mkdir();
+            }
+            try {
+                Date date = new Date();
+                String save_name = (format.format(date) + ".jpg");
+                File saveFile = new File(path + File.separator + save_name);
+
+                BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(saveFile));
+                Bitmap mBitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
+
+                int picWidth = mBitmap.getWidth();
+                int picHeight = mBitmap.getHeight();
+
+                Bitmap rBitmap = null;
+
+                if (picWidth > picHeight) {
+                    rBitmap = rotaingImageView(90, picHeight, picHeight, mBitmap);
+                }
+                rBitmap.compress(Bitmap.CompressFormat.JPEG, 100, bos);
+
+                bos.flush();
+                bos.close();
+                startPreview(holder);
+                photo_name = saveFile.getAbsolutePath();
+            } catch (Exception e) {
+                closeCamera();
+            } finally {
+                if (iPictureCallback != null) {
+                    Message message = Message.obtain();
+                    message.what = MsgCons.CAMERA_PHOTO_PREPARED;
+                    message.obj = photo_name;
+                    iPictureCallback.photoPrepared(message);
+                }
+                
+            }
+        }
+    };
+
+    public void addCallback(IPictureCallback iPictureCallback) {
+        this.iPictureCallback = iPictureCallback;
+    }
+
+    public void delCallback() {
+        this.iPictureCallback = null;
+    }
+
+    public void startPreview(SurfaceHolder holder) {
+        LogUtil.wInfo("startPreview");
+        if (!mPreviewing) {
+            try {
+                if (camera != null) {
+                    camera.setPreviewDisplay(holder);
+                    camera.startPreview();
+                    mPreviewing = true;
+                }
+            } catch (IOException e) {
+                closeCamera();
+                e.printStackTrace();
+                LogUtil.wError("startPreview failed.");
+            }
+        }
+
+    }
+
+    public void stopPreview() {
+        LogUtil.wInfo("stopPreview");
+        if (camera != null) {
+            camera.stopPreview();
+            camera.setPreviewCallback(null);
+            mPreviewing = false;
+        }
+    }
+
+    /**
+     * 鍏抽棴鎽勫儚澶�
+     */
+    public void closeCamera() {
+        LogUtil.wInfo("closeCamera");
+
+        if (camera == null) {
+            return;
+        } else {
+            camera.setErrorCallback(null);
+            if (mPreviewing) {
+                stopPreview();
+            }
+            camera.release();
+            camera = null;
+        }
+
+    }
+
+    @Override
+    public void onError(int error, Camera camera) {
+        LogUtil.wInfo("Camera error:" + error);
+    }
+
+
+}
